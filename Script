@@ -1,3 +1,7 @@
+--====================================================--
+-- STEAL A LATAMROT - Versión refactorizada y mejorada
+--====================================================--
+
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
@@ -15,59 +19,195 @@ local Window = Rayfield:CreateWindow({
 local TabTPS = Window:CreateTab("TPS", 4483362458)
 local TabPlayer = Window:CreateTab("Player", 4483362458)
 
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.ResetOnSpawn = false
-ScreenGui.Enabled = false
-ScreenGui.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui")
+-- Servicios
+local TweenService = game:GetService("TweenService")
+local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
+local LocalPlayer = game.Players.LocalPlayer
 
-local Frame = Instance.new("Frame")
-Frame.Size = UDim2.new(0, 200, 0, 120)
-Frame.Position = UDim2.new(0.05, 0, 0.3, 0)
-Frame.BackgroundColor3 = Color3.new(0.2, 0.2, 0.2)
-Frame.Parent = ScreenGui
+-- ================= TP GUI (Puntos) =================
+-- ScreenGui para la funcionalidad de guardar y tp a punto
+local TP_ScreenGui = Instance.new("ScreenGui")
+TP_ScreenGui.ResetOnSpawn = false
+TP_ScreenGui.Enabled = false
+TP_ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
-local BtnGuardar = Instance.new("TextButton")
-BtnGuardar.Size = UDim2.new(1, -20, 0, 40)
-BtnGuardar.Position = UDim2.new(0, 10, 0, 10)
-BtnGuardar.Text = "Guardar Punto"
-BtnGuardar.Parent = Frame
+local TP_Frame = Instance.new("Frame")
+TP_Frame.Size = UDim2.new(0, 220, 0, 110)
+TP_Frame.Position = UDim2.new(0.05, 0, 0.3, 0)
+TP_Frame.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+TP_Frame.Active = true
+TP_Frame.Draggable = true
+TP_Frame.Parent = TP_ScreenGui
 
-local BtnTP = Instance.new("TextButton")
-BtnTP.Size = UDim2.new(1, -20, 0, 40)
-BtnTP.Position = UDim2.new(0, 10, 0, 65)
-BtnTP.Text = "TP a Punto Guardado"
-BtnTP.Parent = Frame
+local TP_Title = Instance.new("TextLabel")
+TP_Title.Size = UDim2.new(1, 0, 0, 26)
+TP_Title.Position = UDim2.new(0, 0, 0, 0)
+TP_Title.BackgroundTransparency = 1
+TP_Title.Text = "TP Punto - Flotante"
+TP_Title.TextColor3 = Color3.new(1,1,1)
+TP_Title.Font = Enum.Font.SourceSansBold
+TP_Title.TextSize = 18
+TP_Title.Parent = TP_Frame
+
+local BtnAguardar = Instance.new("TextButton")
+BtnAguardar.Size = UDim2.new(0.9, 0, 0, 36)
+BtnAguardar.Position = UDim2.new(0.05, 0, 0, 32)
+BtnAguardar.Text = "Aguardar Punto"
+BtnAguardar.Parent = TP_Frame
+BtnAguardar.AutoButtonColor = true
+BtnAguardar.Font = Enum.Font.SourceSans
+BtnAguardar.TextSize = 16
+BtnAguardar.BackgroundColor3 = Color3.fromRGB(80,80,80)
+BtnAguardar.TextColor3 = Color3.new(1,1,1)
+
+local BtnTPpunto = Instance.new("TextButton")
+BtnTPpunto.Size = UDim2.new(0.9, 0, 0, 36)
+BtnTPpunto.Position = UDim2.new(0.05, 0, 0, 72)
+BtnTPpunto.Text = "TP Punto"
+BtnTPpunto.Parent = TP_Frame
+BtnTPpunto.AutoButtonColor = true
+BtnTPpunto.Font = Enum.Font.SourceSans
+BtnTPpunto.TextSize = 16
+BtnTPpunto.BackgroundColor3 = Color3.fromRGB(60,130,200)
+BtnTPpunto.TextColor3 = Color3.new(1,1,1)
 
 local puntoGuardado = nil
+local savingFeedbackTimer = nil
+local tpFeedbackTimer = nil
 
-BtnGuardar.MouseButton1Click:Connect(function()
-    local char = game.Players.LocalPlayer.Character or game.Players.LocalPlayer.CharacterAdded:Wait()
-    if char:FindFirstChild("HumanoidRootPart") then
-        puntoGuardado = char.HumanoidRootPart.Position
-        BtnGuardar.Text = "Punto Guardado!"
-        task.wait(1)
-        BtnGuardar.Text = "Guardar Punto"
+-- Guarda la posición actual del HRP
+BtnAguardar.MouseButton1Click:Connect(function()
+    local player = LocalPlayer
+    local char = player and (player.Character or player.CharacterAdded:Wait())
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then
+        hrp = char:FindFirstChildWhichIsA("BasePart") -- fallback
+        if not hrp then
+            BtnAguardar.Text = "Sin HRP"
+            task.wait(1)
+            BtnAguardar.Text = "Aguardar Punto"
+            return
+        end
     end
+
+    puntoGuardado = hrp.Position
+    BtnAguardar.Text = "Punto Aguardado!"
+    if savingFeedbackTimer then savingFeedbackTimer:Cancel() end
+    savingFeedbackTimer = task.delay(1, function()
+        BtnAguardar.Text = "Aguardar Punto"
+        savingFeedbackTimer = nil
+    end)
 end)
 
-BtnTP.MouseButton1Click:Connect(function()
-    if puntoGuardado then
-        local char = game.Players.LocalPlayer.Character or game.Players.LocalPlayer.CharacterAdded:Wait()
-        char.HumanoidRootPart.CFrame = CFrame.new(puntoGuardado)
+-- Funcion auxiliar: calcula tiempo de tween basado en distancia
+local function calcTweenTime(fromPos, toPos)
+    local dist = (fromPos - toPos).Magnitude
+    local speed = 20 -- unidades por segundo, ajustable (más = más rápido)
+    local t = dist / speed
+    if t < 0.4 then t = 0.4 end
+    if t > 6 then t = 6 end
+    return t
+end
+
+-- TP al punto guardado: primero te sube 10m y luego te lleva flotando al punto guardado
+BtnTPpunto.MouseButton1Click:Connect(function()
+    if not puntoGuardado then
+        BtnTPpunto.Text = "No hay punto"
+        if tpFeedbackTimer then tpFeedbackTimer:Cancel() end
+        tpFeedbackTimer = task.delay(1, function()
+            BtnTPpunto.Text = "TP Punto"
+            tpFeedbackTimer = nil
+        end)
+        return
+    end
+
+    local player = LocalPlayer
+    local char = player and (player.Character or player.CharacterAdded:Wait())
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hrp then
+        hrp = char:WaitForChild("HumanoidRootPart", 2)
+        if not hrp then
+            BtnTPpunto.Text = "Sin HRP"
+            task.wait(1)
+            BtnTPpunto.Text = "TP Punto"
+            return
+        end
+    end
+
+    -- Teleport instantáneo 10 metros hacia arriba (evitar colisiones)
+    local ok, err = pcall(function()
+        hrp.CFrame = hrp.CFrame + Vector3.new(0, 10, 0)
+    end)
+    if not ok then
+        warn("Error al tp arriba:", err)
+        BtnTPpunto.Text = "Error TP"
+        task.wait(1)
+        BtnTPpunto.Text = "TP Punto"
+        return
+    end
+
+    -- Tras subir, hacer un tween para "flotar" al punto guardado
+    local targetCFrame = CFrame.new(puntoGuardado + Vector3.new(0, 2, 0)) -- llegar un poco arriba del punto para evitar clipping
+    local duration = calcTweenTime(hrp.Position, puntoGuardado)
+    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out)
+    local success, tween = pcall(function()
+        return TweenService:Create(hrp, tweenInfo, {CFrame = targetCFrame})
+    end)
+    if success and tween then
+        BtnTPpunto.Text = "Viajando..."
+        tween:Play()
+        local finished = false
+        tween.Completed:Connect(function()
+            finished = true
+        end)
+
+        -- Timeout en caso de que nunca termine (seguridad)
+        local timeout = task.delay(duration + 1, function()
+            if not finished then
+                pcall(function() tween:Cancel() end)
+            end
+        end)
+
+        -- Esperar a que termine el tween
+        repeat task.wait(0.05) until finished
+        if timeout then pcall(function() task.cancel(timeout) end) end
+
+        -- Restaurar estado humanoide si es necesario
+        if hum and hum.PlatformStand then
+            hum.PlatformStand = false
+        end
+
+        BtnTPpunto.Text = "Llegaste!"
+        if tpFeedbackTimer then tpFeedbackTimer:Cancel() end
+        tpFeedbackTimer = task.delay(1.2, function()
+            BtnTPpunto.Text = "TP Punto"
+            tpFeedbackTimer = nil
+        end)
     else
-        BtnTP.Text = "No hay punto guardado"
+        warn("No se pudo crear tween para flotar.")
+        BtnTPpunto.Text = "Error Flotar"
         task.wait(1)
-        BtnTP.Text = "TP a Punto Guardado"
+        BtnTPpunto.Text = "TP Punto"
     end
 end)
 
+-- Toggle para mostrar/ocultar la GUI de TP (manteniendo la ScreenGui, sin eliminar nada)
 TabTPS:CreateToggle({
     Name = "Tp Scrip",
     CurrentValue = false,
     Callback = function(state)
-        ScreenGui.Enabled = state
+        TP_ScreenGui.Enabled = state
     end
 })
+
+-- ==================================================
+-- Código existente original (spamHit, rejoin, player options, desync, etc.)
+-- Hecho para mantener todo tal cual y sólo integrar la nueva GUI/funcionalidad.
+-- ==================================================
 
 local spamHitToggle = false
 local spamHitLoopTask = nil
@@ -103,10 +243,7 @@ TabTPS:CreateToggle({
     end
 })
 
-local HttpService = game:GetService("HttpService")
-local TeleportService = game:GetService("TeleportService")
-local LocalPlayer = game.Players.LocalPlayer
-
+-- Rejoin / Server browser (mantenido exactamente como estaba; integrado)
 local rejoinGui = nil
 
 local function getServers(cursor)
@@ -258,6 +395,7 @@ TabTPS:CreateToggle({
     end
 })
 
+-- Player related variables y toggles (mantener)
 local humanoid = nil
 local speedToggle = false
 local currentSpeed = 16
@@ -300,7 +438,7 @@ TabPlayer:CreateSlider({
     Increment = 1,
     CurrentValue = 50,
     Callback = function(v)
-        Frame.BackgroundColor3 = Color3.fromRGB(v, 50, 255 - v)
+        TP_Frame.BackgroundColor3 = Color3.fromRGB(v, 50, 255 - v)
     end
 })
 
@@ -349,6 +487,7 @@ TabPlayer:CreateButton({
     Callback = function() ragdollPlayer(3) end
 })
 
+-- Desync Body (mantener y GUI draggable)
 local desyncActive = false
 local desyncGui = nil
 local desyncBP = nil
@@ -429,3 +568,6 @@ TabPlayer:CreateToggle({
         if v then createDesyncGUI() else removeDesyncGUI() end
     end
 })
+
+-- Fin del script (todo lo demás quedó intacto; la funcionalidad de TP Flotante fue reemplazada
+-- por la GUI flotante con "Aguardar Punto" y "TP Punto" que sube 10m y te lleva flotando al punto).
